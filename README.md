@@ -76,6 +76,7 @@ The script will then automatically relax the constraint and repeat until the con
 
 ## :hourglass_flowing_sand: Version history
 
+- `v0.4`: Fixes and functionality improvements
 - `v0.3`: Refactored interface
 - `v0.2`: Switch to `pyosys` and addition of the timing search
 - `v0.1`: Initial release
