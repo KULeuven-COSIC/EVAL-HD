@@ -28,10 +28,12 @@ def report_modules(design, cell_library: str) -> None:
         return name if name in modules else "\\" + name
 
     # the area of a module includes its submodules (Yosys >= 0.4x); subtract them for its own area
+    # (a module without cells has no area in the report)
+    area = {name: info.get("area", 0.0) for name, info in modules.items()}
     own = {}
-    for name, info in modules.items():
-        sub = sum(n * modules[key(c)]["area"] for c, n in children(name).items())
-        own[name] = info["area"] - sub if info["area"] >= sub - 1e-6 else info["area"]
+    for name in modules:
+        sub = sum(n * area[key(c)] for c, n in children(name).items())
+        own[name] = area[name] - sub if area[name] >= sub - 1e-6 else area[name]
 
     total = {}
     def total_area(name: str) -> float:
@@ -140,8 +142,9 @@ def timing_analysis(evaluate_target) -> None:
     _, delay = evaluate_target(1, probe=True)
 
     # the design for a target of this delay (rounded up), for its area and to check that the target
-    # is met; if not, once more for the delay reached there
-    for _ in range(2):
+    # is met; if not, again for the delay reached there (with a longer target, the gates are sized
+    # with less effort, so the delay can increase), at most 10 times
+    for _ in range(10):
         met, delay = evaluate_target(math.ceil(delay))
         if met:
             return

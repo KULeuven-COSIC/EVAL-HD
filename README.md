@@ -62,7 +62,7 @@ The script synthesizes the target design into a (flattened) ASIC netlist and dis
 Additionally, if the `--report-timing` flag is set, the critical path of the design can be determined.
 The delay of the (flattened) netlist is first estimated by ABC (`stime`) for the tightest timing constraint.
 The design is then synthesized for this delay (rounded up), to check that the constraint is met and to report the area.
-If the estimated delay exceeds the timing constraint, the timing fails and this is repeated once for the delay that was reached.
+If the estimated delay exceeds the timing constraint, the timing fails and this is repeated for the delay that was reached (at most 10 times).
 
 ```shell
 $ ./eval-hd.py examples/core-ami-static.v --report-timing
