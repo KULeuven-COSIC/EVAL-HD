@@ -6,4 +6,10 @@ result.v
 *.bin
 
 # logging outputs
-eval_output_*.txt
+eval_output*.txt
+
+# Python
+__pycache__/
+
+# Editors
+.vscode/
