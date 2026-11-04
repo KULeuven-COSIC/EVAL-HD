@@ -36,65 +36,60 @@ def print_modules(stdout: str) -> None:
     print("(areas in µm² over all instances of a module; the own areas add up to the design area)")
 
 
-def run_with_timing(design_file: str, top_module: str, target: int, cell_library: str, logging: bool) -> bool:
-    timing_success = True
+def timing_analysis(design_file: str, top_module: str, cell_library: str, logging: bool) -> Optional[int]:
+    print("Starting timing analysis...")
 
-    result = subprocess.run(bridge_command(design_file, top_module, cell_library) + [
-        "--report-timing",
-        "--timing-target", str(target)
-    ], capture_output=True, text=True)
+    # one Yosys process: the design is synthesized once and mapped for every target, which is
+    # reported on stderr while the analysis runs
+    log = open("eval_output.txt", 'wt') if logging else subprocess.DEVNULL
+    process = subprocess.Popen(bridge_command(design_file, top_module, cell_library) + [
+        "--timing-analysis"
+    ], stdout=log, stderr=subprocess.PIPE, text=True)
 
-    if logging:
-        with open(f"eval_output_{target}.txt", 'wt') as f:
-            f.write(result.stdout)
+    best_target = None
+    any_failed = False
+    failed_delay = None
+    errors = []
+    for line in process.stderr:
+        line = line.strip()
+        if bs := re.match(r"BEST delay=(\d+.\d+)$", line):
+            print(f"Estimated delay with the tightest timing constraint: {float(bs.group(1)):.1f} ps")
+        elif ts := re.match(r"TRY target=(\d+)$", line):
+            # a failed target is reported together with the next one that is tried
+            if failed_delay is None:
+                print(f"Trying {ts.group(1)} ps...")
+            else:
+                print(f"Timing failed (estimated delay {failed_delay:.1f} ps), trying {ts.group(1)} ps...")
+                failed_delay = None
+        elif rs := re.match(r"TIMING target=(\d+) met=(\d) delay=(\d+.\d+) area=(\S+)$", line):
+            target, met, delay = int(rs.group(1)), rs.group(2) == "1", float(rs.group(3))
+            if not met:
+                any_failed = True
+                failed_delay = delay
+            elif rs.group(4) == "-":
+                print("Failed to parse area measurement.")
+                print("This likely indicates an error, it is recommended to run the script with --logging and examine the output.")
+                print("Exiting!")
+                exit(1)
+            else:
+                area = float(rs.group(4))
+                best_target = target
+                print(f"Area = {area:.2f} µm² = {(area / 1000000):.4f} mm²")
+                print(f"Timing met: {target} ps = {target / 1000} ns = {1 / (target / 1000000):.2f} MHz")
+        else:
+            errors.append(line + "\n")
 
-    # the delay of the mapped and sized design, as estimated by ABC (stime)
-    drs = re.findall(r"Delay =\s*(\d+.\d+) ps", result.stdout)
-    if not drs:
-        print("Failed to parse timing measurement.")
-        print("This likely indicates an error, it is recommended to run the script with --logging and examine the output.")
+    if failed_delay is not None:
+        print(f"Timing failed (estimated delay {failed_delay:.1f} ps)")
+
+    if process.wait() != 0 or best_target is None and not any_failed:
+        print("".join(errors[-20:]), end="")
+        print("The timing analysis failed, it is recommended to run the script with --logging and examine the output.")
         print("Exiting!")
         exit(1)
-    delay = float(drs[-1])
-    if delay > target:
-        print(f"Timing failed ({target} ps, estimated delay {delay:.1f} ps)")
-        timing_success = False
-    else:
-        area = parse_area(result.stdout, top_module)
-        if area is not None:
-            print(f"Area = {area:.2f} µm² = {(area / 1000000):.4f} mm²")
-            print(
-                f"Timing met: {target} ps = {target / 1000} ns = {1 / (target / 1000000):.2f} MHz (estimated delay {delay:.1f} ps)")
-        else:
-            print("Failed to parse area measurement.")
-            print("This likely indicates an error, it is recommended to run the script with --logging and examine the output.")
-            print("Exiting!")
-            exit(1)
 
-    return timing_success
-
-
-def naive_search(design_file: str, top_module: str, maximum_target: int, cell_library: str, logging: bool) -> Optional[int]:
-    successful_target = maximum_target
-    success = False
-    any_failed = False
-    best_target = None
-
-    print(f"Starting timing search up to {maximum_target} ps...")
-
-    for step in [1000, 100, 10, 1]:
-        for target in range(successful_target - 9 * step, successful_target, step):
-            success = run_with_timing(
-                design_file, top_module, target, cell_library, logging)
-            if success:
-                successful_target = target
-                best_target = target
-                break
-            else:
-                any_failed = True
-
-    if not any_failed:
-        print("No timing measurement failed. It is recommended to configure a lower maximum target to find the shortest critical path.")
+    if best_target is None:
+        print("No target met at the estimated delay.")
 
     return best_target
 
@@ -108,18 +103,18 @@ def main() -> None:
     parser.add_argument("--cell-library", default="freepdk-45nm/stdcells.lib",
                         help="Path to the cell library (default: freepdk-45nm/stdcells.lib).")
     parser.add_argument("--logging", action="store_true",
-                        help="Log full Yosys output in text files.")
-    parser.add_argument("--maximum-target", type=int,
-                        help="Maximum timing constraint (in picoseconds).")
+                        help="Log the full Yosys output in eval_output.txt.")
+    parser.add_argument("--report-timing", action="store_true",
+                        help="Report the shortest critical path, as estimated by ABC.")
     parser.add_argument("--report-modules", action="store_true",
-                        help="Report the area of every module (in the timing search: at the shortest met target).")
+                        help="Report the area of every module (with --report-timing: for the met timing constraint).")
     args = parser.parse_args()
 
-    if args.maximum_target is not None:
-        best_target = naive_search(args.design_file, args.top_module, args.maximum_target, args.cell_library, args.logging)
+    if args.report_timing:
+        best_target = timing_analysis(args.design_file, args.top_module, args.cell_library, args.logging)
         if args.report_modules and best_target is not None:
-            # module areas need the hierarchy, which the timing search flattens: synthesize again at
-            # the shortest met target without flattening, and report that area
+            # module areas need the hierarchy, which the timing analysis flattens: synthesize again at
+            # the met target without flattening, and report that area
             result = subprocess.run(bridge_command(args.design_file, args.top_module, args.cell_library) + [
                 "--report-timing", "--keep-hierarchy", "--report-modules",
                 "--timing-target", str(best_target)

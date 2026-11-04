@@ -14,4 +14,4 @@ jobs:
         run: python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt
 
       - name: Run EVAL-HD example
-        run: . .venv/bin/activate && ./eval-hd.py examples/core-ami-static.v --maximum-target 11000
+        run: . .venv/bin/activate && ./eval-hd.py examples/core-ami-static.v --report-timing

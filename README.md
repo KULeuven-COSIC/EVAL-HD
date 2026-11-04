@@ -35,7 +35,7 @@ Most of the functionality can be configured using the parameters of the `eval-hd
 ```shell
 $ ./eval-hd.py --help
 usage: eval-hd.py [-h] [--top-module TOP_MODULE] [--cell-library CELL_LIBRARY] [--logging]
-                  [--maximum-target MAXIMUM_TARGET] [--report-modules]
+                  [--report-timing] [--report-modules]
                   design_file
 
 Find the area and the shortest critical path for a design with EVAL-HD.
@@ -49,34 +49,31 @@ options:
                         Name of the top module (default: Core).
   --cell-library CELL_LIBRARY
                         Path to the cell library (default: freepdk-45nm/stdcells.lib).
-  --logging             Log full Yosys output in text files.
-  --maximum-target MAXIMUM_TARGET
-                        Maximum timing constraint (in picoseconds).
-  --report-modules      Report the area of every module (in the timing search: at the shortest met
-                        target).
-
-$ ./eval-hd.py examples/core-ami-static.v --maximum-target 11000
-Starting timing search up to 11000 ps...
-Timing failed (2000 ps, estimated delay 2868.2 ps)
-Area = 42960.33 µm² = 0.0430 mm²
-Timing met: 3000 ps = 3.0 ns = 333.33 MHz (estimated delay 2998.7 ps)
-Timing failed (2100 ps, estimated delay 2868.2 ps)
-[...]
-Timing failed (2868 ps, estimated delay 2868.2 ps)
-Area = 42991.19 µm² = 0.0430 mm²
-Timing met: 2869 ps = 2.869 ns = 348.55 MHz (estimated delay 2868.2 ps)
+  --logging             Log the full Yosys output in eval_output.txt.
+  --report-timing       Report the shortest critical path, as estimated by ABC.
+  --report-modules      Report the area of every module (with --report-timing: for the met timing
+                        constraint).
 ```
 
 For additional configuration, such as using SystemVerilog or multiple source files, it is recommended to modify the script directly.
 
 The script synthesizes the target design into a (flattened) ASIC netlist and displays ASIC area numbers [\mu m^2].
 
-Additionally, if the `--maximum-target` flag is set, the critical path of the design can be determined.
-For every timing constraint, the delay of the (flattened) netlist is estimated by ABC (`stime`) and printed.
-If the estimated delay exceeds the timing constraint, the timing fails (see the example above).
-The script will then automatically relax the constraint and repeat until the constraint is met.
+Additionally, if the `--report-timing` flag is set, the critical path of the design can be determined.
+The delay of the (flattened) netlist is first estimated by ABC (`stime`) for the tightest timing constraint.
+The design is then synthesized for this delay (rounded up), to check that the constraint is met and to report the area.
+If the estimated delay exceeds the timing constraint, the timing fails and this is repeated once for the delay that was reached.
 
-If the `--report-modules` flag is set, the area of every module is reported in the hierarchy of the design, with the number of instances, the area including the submodules and the own area of the module (together with `--maximum-target`, at the shortest met target):
+```shell
+$ ./eval-hd.py examples/core-ami-static.v --report-timing
+Starting timing analysis...
+Estimated delay with the tightest timing constraint: 2868.2 ps
+Trying 2869 ps...
+Area = 42991.19 µm² = 0.0430 mm²
+Timing met: 2869 ps = 2.869 ns = 348.55 MHz
+```
+
+If the `--report-modules` flag is set, the area of every module is reported in the hierarchy of the design, with the number of instances, the area including the submodules and the own area of the module:
 
 ```shell
 $ ./eval-hd.py examples/core-ami-static.v --report-modules
@@ -92,7 +89,8 @@ Core                                                     1              43717.37
 (areas in µm² over all instances of a module; the own areas add up to the design area)
 ```
 
-The module areas require the hierarchy of the design, so with this flag the design is synthesized without flattening it (after the timing search, in an additional synthesis at the shortest met target), and the reported area is the area of this hierarchical netlist.
+If combined with `--report-timing`, the module areas are those of the design synthesized for the met timing constraint.
+The module areas require the hierarchy of the design, so with this flag the design is synthesized without flattening it (after the timing analysis, in an additional synthesis at the met target), and the reported area is the area of this hierarchical netlist.
 Since logic is then not optimized across module boundaries, this total area can differ from the area without the flag (typically by a few percent), but the proportions of the modules are representative.
 
 ## :hourglass_flowing_sand: Version history
