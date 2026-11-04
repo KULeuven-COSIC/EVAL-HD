@@ -5,6 +5,13 @@ import argparse
 import json
 import tempfile
 
+# Timing constraints for ABC in the timing analysis: the cell driving the inputs of the logic and the
+# load on its outputs (in fF), as in OpenROAD-flow-scripts for NanGate45, the library of FreePDK45
+# (flow/platforms/nangate45/config.mk: ABC_DRIVER_CELL = BUF_X1 and ABC_LOAD_IN_FF = 3.898, the
+# input capacitance of BUF_X1, 0.974659 fF, multiplied by 4).
+ABC_DRIVING_CELL = "BUF_X1"
+ABC_LOAD = 3.898
+
 def report_modules(design, cell_library: str) -> None:
     with tempfile.NamedTemporaryFile("rt", suffix=".json") as f:
         ys.run_pass(f"tee -q -o {f.name} stat -json -liberty {cell_library}", design)
@@ -72,8 +79,13 @@ def run_analysis(report_timing: bool, keep_hierarchy: bool, modules: bool, desig
     ys.run_pass(f"dfflibmap -liberty {cell_library}", design)
 
     if report_timing:
-        # mapping logic to cell library with timing constraint
-        ys.run_pass(f"abc -liberty {cell_library} -fast -D {timing_target}", design)
+        # mapping logic to cell library with timing constraint: with -constr, the default ABC script
+        # also buffers and sizes the gates for the target and reports the delay ('stime')
+        with tempfile.NamedTemporaryFile("wt", suffix=".constr") as constraints:
+            # timing constraints: the cell driving the inputs and the load on the outputs
+            constraints.write(f"set_driving_cell {ABC_DRIVING_CELL}\nset_load {ABC_LOAD}\n")
+            constraints.flush()
+            ys.run_pass(f"abc -liberty {cell_library} -constr {constraints.name} -D {timing_target}", design)
     else:
         # mapping logic to cell library
         ys.run_pass(f"abc -liberty {cell_library}", design)

@@ -57,13 +57,14 @@ options:
 
 $ ./eval-hd.py examples/core-ami-static.v --maximum-target 11000
 Starting timing search up to 11000 ps...
-Timing met: 2000 ps = 2.0 ns = 500.00 MHz
-Area = 50168.93 µm² = 0.0502 mm²
-Timing failed (1100 ps)
+Timing failed (2000 ps, estimated delay 2868.2 ps)
+Area = 42960.33 µm² = 0.0430 mm²
+Timing met: 3000 ps = 3.0 ns = 333.33 MHz (estimated delay 2998.7 ps)
+Timing failed (2100 ps, estimated delay 2868.2 ps)
 [...]
-Timing failed (1992 ps)
-Timing met: 1993 ps = 1.993 ns = 501.76 MHz
-Area = 50210.16 µm² = 0.0502 mm²
+Timing failed (2868 ps, estimated delay 2868.2 ps)
+Area = 42991.19 µm² = 0.0430 mm²
+Timing met: 2869 ps = 2.869 ns = 348.55 MHz (estimated delay 2868.2 ps)
 ```
 
 For additional configuration, such as using SystemVerilog or multiple source files, it is recommended to modify the script directly.
@@ -71,26 +72,22 @@ For additional configuration, such as using SystemVerilog or multiple source fil
 The script synthesizes the target design into a (flattened) ASIC netlist and displays ASIC area numbers [\mu m^2].
 
 Additionally, if the `--maximum-target` flag is set, the critical path of the design can be determined.
-If the (flattened) netlist does not meet the timing constraint, a warning will appear in the log messages (Step 13.1.1. Executing ABC.):
-
-```shell
-ABC: Cannot meet the target required times (X picoseconds). Continue anyway.
-```
-
+For every timing constraint, the delay of the (flattened) netlist is estimated by ABC (`stime`) and printed.
+If the estimated delay exceeds the timing constraint, the timing fails (see the example above).
 The script will then automatically relax the constraint and repeat until the constraint is met.
 
 If the `--report-modules` flag is set, the area of every module is reported in the hierarchy of the design, with the number of instances, the area including the submodules and the own area of the module (together with `--maximum-target`, at the shortest met target):
 
 ```shell
 $ ./eval-hd.py examples/core-ami-static.v --report-modules
-Area = 43759.66 µm² = 0.0438 mm²
+Area = 43717.37 µm² = 0.0437 mm²
 Module (hierarchy)                               Instances Area incl. submodules   Share    Own area   Share
-Core                                                     1              43759.66  100.0%      426.13    1.0%
-  Pipeline                                               1              40444.24   92.4%     2280.68    5.2%
-    RegisterFile                                         1               9354.69   21.4%     9354.69   21.4%
-    Stage_IF                                             1               9235.79   21.1%     1099.91    2.5%
-      StreamFifoLowLatency_3                             1               5223.18   11.9%        0.00    0.0%
-        StreamFifo_2                                     1               5223.18   11.9%     5223.18   11.9%
+Core                                                     1              43717.37  100.0%      426.13    1.0%
+  Pipeline                                               1              40390.50   92.4%     2269.51    5.2%
+    RegisterFile                                         1               9271.70   21.2%     9271.70   21.2%
+    Stage_IF                                             1               9253.87   21.2%     1086.61    2.5%
+      StreamFifoLowLatency_3                             1               5251.11   12.0%        0.00    0.0%
+        StreamFifo_2                                     1               5251.11   12.0%     5251.11   12.0%
 [...]
 (areas in µm² over all instances of a module; the own areas add up to the design area)
 ```

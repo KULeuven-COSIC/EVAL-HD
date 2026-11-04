@@ -48,18 +48,23 @@ def run_with_timing(design_file: str, top_module: str, target: int, cell_library
         with open(f"eval_output_{target}.txt", 'wt') as f:
             f.write(result.stdout)
 
-    trs = re.search(
-        r"Cannot meet the target required times \((\d+.\d+)\). Continue anyway.", result.stdout)
-    if trs:
-        timing = float(trs.group(1))
-        print(f"Timing failed ({target} ps)")
+    # the delay of the mapped and sized design, as estimated by ABC (stime)
+    drs = re.findall(r"Delay =\s*(\d+.\d+) ps", result.stdout)
+    if not drs:
+        print("Failed to parse timing measurement.")
+        print("This likely indicates an error, it is recommended to run the script with --logging and examine the output.")
+        print("Exiting!")
+        exit(1)
+    delay = float(drs[-1])
+    if delay > target:
+        print(f"Timing failed ({target} ps, estimated delay {delay:.1f} ps)")
         timing_success = False
     else:
         area = parse_area(result.stdout, top_module)
         if area is not None:
             print(f"Area = {area:.2f} µm² = {(area / 1000000):.4f} mm²")
             print(
-                f"Timing met: {target} ps = {target / 1000} ns = {1 / (target / 1000000):.2f} MHz")
+                f"Timing met: {target} ps = {target / 1000} ns = {1 / (target / 1000000):.2f} MHz (estimated delay {delay:.1f} ps)")
         else:
             print("Failed to parse area measurement.")
             print("This likely indicates an error, it is recommended to run the script with --logging and examine the output.")

@@ -1,1 +1,1 @@
-pyosys==0.60
+pyosys==0.70
