@@ -3,11 +3,7 @@
 from pyosys import libyosys as ys
 import argparse
 import json
-import math
-import re
-import sys
 import tempfile
-from typing import Optional
 
 # Timing constraints for ABC in the timing analysis: the cell driving the inputs of the logic and the
 # load on its outputs (in fF), as in OpenROAD-flow-scripts for NanGate45, the library of FreePDK45
@@ -15,6 +11,10 @@ from typing import Optional
 # input capacitance of BUF_X1, 0.974659 fF, multiplied by 4).
 ABC_DRIVING_CELL = "BUF_X1"
 ABC_LOAD = 3.898
+
+# Tightest timing constraint (in picoseconds), which cannot be met: ABC then optimizes, buffers and
+# sizes the gates with maximum effort, so the estimated delay is the shortest critical path it finds.
+TIGHTEST_TARGET = 1
 
 def report_modules(design, cell_library: str) -> None:
     with tempfile.NamedTemporaryFile("rt", suffix=".json") as f:
@@ -82,104 +82,52 @@ def synthesize(design, design_file: str, top_module: str, cell_library: str, fla
     # mapping flip-flops to cell library
     ys.run_pass(f"dfflibmap -liberty {cell_library}", design)
 
-def logged(design, command: str) -> str:
-    # run a command and return its log output
-    with tempfile.NamedTemporaryFile("rt", suffix=".log") as f:
-        ys.run_pass(f"tee -o {f.name} {command}", design)
-        return f.read()
+def run_analysis(report_timing: bool, keep_hierarchy: bool, modules: bool, design_file: str, top_module: str, cell_library: str) -> None:
+    design = ys.Design()
 
-def map_logic(design, cell_library: str, timing_target: Optional[int]) -> str:
-    if timing_target is None:
-        # mapping logic to cell library
-        return logged(design, f"abc -liberty {cell_library}")
+    synthesize(design, design_file, top_module, cell_library, flatten=not keep_hierarchy)
 
-    # mapping logic to cell library with timing constraint: with -constr, the default ABC script
-    # also buffers and sizes the gates for the target and reports the delay ('stime')
-    with tempfile.NamedTemporaryFile("wt", suffix=".constr") as constraints:
-        # timing constraints: the cell driving the inputs and the load on the outputs
-        constraints.write(f"set_driving_cell {ABC_DRIVING_CELL}\nset_load {ABC_LOAD}\n")
-        constraints.flush()
-        return logged(design, f"abc -liberty {cell_library} -constr {constraints.name} -D {timing_target}")
+    if report_timing:
+        # the timing analysis maps the same synthesized design again
+        ys.run_pass("design -save synthesized", design)
 
-def finish(design, cell_library: str, write_netlist: bool = True) -> Optional[float]:
+    # mapping logic to cell library
+    ys.run_pass(f"abc -liberty {cell_library}", design)
+
     # cleanup
     ys.run_pass("clean", design)
 
     # write synthesized design
-    if write_netlist:
-        ys.run_pass("write_verilog result.v", design)
+    ys.run_pass("write_verilog result.v", design)
 
     # get ASIC gate count and area numbers
-    stat = logged(design, f"stat -liberty {cell_library}")
-    rs = re.findall(r"Chip area for (?:top )?module '.*': (\d+.\d+)", stat)
-    return float(rs[-1]) if rs else None
-
-def evaluate(design, cell_library: str, target: int, probe: bool = False) -> tuple:
-    # map the synthesized design for one target: met, estimated delay and area (a probe only reports
-    # the delay); the steps are reported on stderr, which is not buffered and not mixed with the
-    # Yosys output
-    if not probe:
-        print(f"TRY target={target}", file=sys.stderr, flush=True)
-    ys.run_pass("design -load synthesized", design)
-    abc = map_logic(design, cell_library, target)
-    delays = re.findall(r"Delay =\s*(\d+.\d+) ps", abc)
-    if not delays:
-        sys.exit("Failed to parse the delay reported by ABC.")
-    delay = float(delays[-1])
-    met = delay <= target
-    # the netlist of the met target is kept in result.v
-    area = finish(design, cell_library, write_netlist=met)
-
-    if probe:
-        print(f"BEST delay={delay:.2f}", file=sys.stderr, flush=True)
-    else:
-        print(f"TIMING target={target} met={int(met)} delay={delay:.2f} "
-              f"area={'-' if area is None else f'{area:.3f}'}", file=sys.stderr, flush=True)
-    return met, delay
-
-def timing_analysis(evaluate_target) -> None:
-    # the delay with the tightest target (1 ps), for which the gates are sized with maximum effort
-    _, delay = evaluate_target(1, probe=True)
-
-    # the design for a target of this delay (rounded up), for its area and to check that the target
-    # is met; if not, again for the delay reached there (with a longer target, the gates are sized
-    # with less effort, so the delay can increase), at most 10 times
-    for _ in range(10):
-        met, delay = evaluate_target(math.ceil(delay))
-        if met:
-            return
-
-def run_analysis(report_timing: bool, keep_hierarchy: bool, modules: bool, design_file: str, top_module: str, timing_target: int, timing_analysis_mode: bool, cell_library: str) -> None:
-    design = ys.Design()
-
-    if timing_analysis_mode:
-        # timing analysis: the design is synthesized once, only the mapping depends on the target
-        synthesize(design, design_file, top_module, cell_library, flatten=True)
-        ys.run_pass("design -save synthesized", design)
-        timing_analysis(lambda target, probe=False: evaluate(design, cell_library, target, probe))
-        return
-
-    synthesize(design, design_file, top_module, cell_library, flatten=not keep_hierarchy)
-    map_logic(design, cell_library, timing_target if report_timing else None)
-    finish(design, cell_library)
+    ys.run_pass(f"stat -liberty {cell_library}", design)
 
     if modules:
         # get the area of every module
         report_modules(design, cell_library)
+
+    if report_timing:
+        # mapping logic to cell library with the tightest timing constraint: with -constr, the
+        # default ABC script also buffers and sizes the gates and reports the delay ('stime')
+        ys.run_pass("design -load synthesized", design)
+        with tempfile.NamedTemporaryFile("wt", suffix=".constr") as constraints:
+            # timing constraints: the cell driving the inputs and the load on the outputs
+            constraints.write(f"set_driving_cell {ABC_DRIVING_CELL}\nset_load {ABC_LOAD}\n")
+            constraints.flush()
+            ys.run_pass(f"abc -liberty {cell_library} -constr {constraints.name} -D {TIGHTEST_TARGET}", design)
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Synthesize a design for ASIC using Yosys.")
     parser.add_argument("design_file", type=str, help="Path to the Verilog design file.")
     parser.add_argument("--top-module", type=str, default="Core", help="Name of the top module (default: Core).")
     parser.add_argument("--cell-library", default="freepdk-45nm/stdcells.lib", help="Path to the cell library (default: FreePDK).")
-    parser.add_argument("--report-timing", action="store_true", help="Enable timing analysis during synthesis.")
-    parser.add_argument("--timing-target", type=int, default=2500, help="Target timing constraint (in picoseconds, default: 2500).")
-    parser.add_argument("--timing-analysis", action="store_true", help="Analyze the timing: the delay with the tightest timing constraint, and the design at a constraint of that delay; reported per step on stderr.")
+    parser.add_argument("--report-timing", action="store_true", help="Also estimate the shortest critical path (mapping with the tightest timing constraint).")
     parser.add_argument("--keep-hierarchy", action="store_true", help="Do not flatten the design (needed to report the area of every module).")
     parser.add_argument("--report-modules", action="store_true", help="Report the area of every module.")
     args = parser.parse_args()
 
-    run_analysis(args.report_timing, args.keep_hierarchy, args.report_modules, args.design_file, args.top_module, args.timing_target, args.timing_analysis, args.cell_library)
+    run_analysis(args.report_timing, args.keep_hierarchy, args.report_modules, args.design_file, args.top_module, args.cell_library)
 
 if __name__ == "__main__":
     main()

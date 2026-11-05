@@ -50,27 +50,21 @@ options:
   --cell-library CELL_LIBRARY
                         Path to the cell library (default: freepdk-45nm/stdcells.lib).
   --logging             Log the full Yosys output in eval_output.txt.
-  --report-timing       Report the shortest critical path, as estimated by ABC.
-  --report-modules      Report the area of every module (with --report-timing: for the met timing
-                        constraint).
+  --report-timing       Also report the shortest critical path, as estimated by ABC.
+  --report-modules      Report the area of every module (synthesized without flattening).
 ```
 
 For additional configuration, such as using SystemVerilog or multiple source files, it is recommended to modify the script directly.
 
 The script synthesizes the target design into a (flattened) ASIC netlist and displays ASIC area numbers [\mu m^2].
 
-Additionally, if the `--report-timing` flag is set, the critical path of the design can be determined.
-The delay of the (flattened) netlist is first estimated by ABC (`stime`) for the tightest timing constraint.
-The design is then synthesized for this delay (rounded up), to check that the constraint is met and to report the area.
-If the estimated delay exceeds the timing constraint, the timing fails and this is repeated for the delay that was reached (at most 10 times).
+Additionally, if the `--report-timing` flag is set, the critical path of the design is estimated.
+The synthesized design is then mapped once more by ABC, with the tightest timing constraint, and the delay of the result is estimated by ABC (`stime`).
 
 ```shell
 $ ./eval-hd.py examples/core-ami-static.v --report-timing
-Starting timing analysis...
-Estimated delay with the tightest timing constraint: 2868.2 ps
-Trying 2869 ps...
-Area = 42991.19 µm² = 0.0430 mm²
-Timing met: 2869 ps = 2.869 ns = 348.55 MHz
+Area = 41286.39 µm² = 0.0413 mm²
+Estimated delay with the tightest timing constraint: 2868.2 ps = 2.868 ns = 348.65 MHz
 ```
 
 If the `--report-modules` flag is set, the area of every module is reported in the hierarchy of the design, with the number of instances, the area including the submodules and the own area of the module:
@@ -89,8 +83,7 @@ Core                                                     1              43717.37
 (areas in µm² over all instances of a module; the own areas add up to the design area)
 ```
 
-If combined with `--report-timing`, the module areas are those of the design synthesized for the met timing constraint.
-The module areas require the hierarchy of the design, so with this flag the design is synthesized without flattening it (after the timing analysis, in an additional synthesis at the met target), and the reported area is the area of this hierarchical netlist.
+The module areas require the hierarchy of the design, so with this flag the design is synthesized without flattening it, and the reported area is the area of this hierarchical netlist.
 Since logic is then not optimized across module boundaries, this total area can differ from the area without the flag (typically by a few percent), but the proportions of the modules are representative.
 
 ## :hourglass_flowing_sand: Version history
