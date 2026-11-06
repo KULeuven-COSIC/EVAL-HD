@@ -88,6 +88,7 @@ Since logic is then not optimized across module boundaries, this total area can 
 
 ## :hourglass_flowing_sand: Version history
 
+- `v0.5`: Added `--report-modules` and `--report-timing` now estimates the critical path through synthesis using the tightest timing constraint.
 - `v0.4`: Fixes and functionality improvements
 - `v0.3`: Refactored interface
 - `v0.2`: Switch to `pyosys` and addition of the timing search
